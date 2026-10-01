@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "Zapas — Stage A Chrome Probe",
+  "version": "0.1.0",
+  "description": "Изолированная техническая проверка вкладок и Native Messaging. Только тестовые действия.",
+  "minimum_chrome_version": "140",
+  "permissions": [
+    "tabs",
+    "nativeMessaging"
+  ],
+  "background": {
+    "service_worker": "worker.mjs",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Открыть проверку Zapas"
+  },
+  "incognito": "not_allowed",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEApK0w1FrrjUlbCv+4e3UoC1Z/mj3AxN5NTBq2wLKzR2zW/oSb37szN2fXiPbiCeUmkqxyP0LW23ZWYN/rN8XP8m97PfQ+nfB2w46XWGKJdHmUFRypupAG1gsdzZ0/zTGuTBolkMHyO3q2w6X1IBZDV7trMDmG4UzQ6+yJqJDzTgOyY7vmidcx9b2asq9dmVM/P8ymIYd12/4N61aEodaipt4fydbw624rb0VkxzBiaNHddz3kqUT96QM2yODmBLGddfdaCq1qeva7VFD4QHWbxh/FpZmh8SWcleEItz71g7yWndb8TTb0zhLMe3uzXX2DpyqXc6G0ZqIlFRFKYQGreQIDAQAB"
+}

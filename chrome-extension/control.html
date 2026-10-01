@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><title>Zapas — этап A</title><link rel="stylesheet" href="style.css"></head>
+<body><main>
+<h1>Zapas — проверка Chrome</h1>
+<p>Используйте отдельный тестовый профиль. Прототип выгружает только страницы, созданные кнопкой ниже. Точная память вкладок неизвестна.</p>
+<button id="connect">Подключить Native Messaging</button>
+<button id="disconnect">Отключить</button>
+<button id="fixture">Создать тестовую вкладку</button>
+<button id="refresh">Обновить</button>
+<p id="status" role="status">Отключено</p>
+<p>После создания или активации подождите 60 секунд. Это порог технического прототипа. Выгрузка выполняется через CLI с явным выбором session ID и tab ID.</p>
+<pre id="result"></pre>
+<table><thead><tr><th>ID</th><th>Название</th><th>Состояние</th><th>Защита</th></tr></thead><tbody id="tabs"></tbody></table>
+</main><script type="module" src="control.mjs"></script></body></html>

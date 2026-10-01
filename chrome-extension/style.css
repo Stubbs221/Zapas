@@ -1,0 +1,6 @@
+body { font: 16px system-ui; color-scheme: light dark; margin: 32px; }
+main { max-width: 1000px; margin: auto; }
+button, input { font: inherit; padding: 8px 12px; margin: 4px; }
+table { width: 100%; border-collapse: collapse; }
+td, th { padding: 10px; text-align: left; border-bottom: 1px solid #8885; }
+pre { white-space: pre-wrap; }

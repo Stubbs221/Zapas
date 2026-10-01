@@ -8,6 +8,8 @@
 .swiftpm/
 DerivedData/
 build/
+__pycache__/
+*.pyc
 *.xcuserstate
 xcuserdata/
 # OS / editor
