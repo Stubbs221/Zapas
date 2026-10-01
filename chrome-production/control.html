@@ -1,0 +1,13 @@
+<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Zapas — подключение Chrome</title>
+<link rel="stylesheet" href="style.css"><main>
+<h1>Zapas · Chrome</h1><p class="subtitle">Подключите этот профиль к локальному приложению Zapas.</p>
+<section class="card" aria-labelledby="setup"><h2 id="setup">Три шага подключения</h2>
+<ol><li>В Zapas откройте Chrome → Подключение и защита → «Установить Native Messaging». Выберите корень Chrome user-data.</li><li>Загрузите расширение через chrome://extensions → Режим разработчика → Загрузить распакованное. Установка в Chrome Web Store не выполнена.</li><li>Задайте метку профиля и нажмите «Подключить» ниже. Выбор вкладок и preview находятся в Zapas.</li></ol>
+<p class="hint">Разрешение tabs позволяет видеть названия и домены вкладок. Передаются только их состояние локальному приложению; формы и полный URL не передаются. Точная RAM вкладок неизвестна.</p></section>
+<section class="card" aria-labelledby="profile"><h2 id="profile">Этот профиль</h2>
+<label for="label">Метка профиля</label><input id="label" maxlength="80" value="Chrome" autocomplete="off">
+<div class="actions"><button id="connect">Подключить</button><button id="disconnect">Отключить</button><button id="refresh">Обновить</button></div>
+<p id="status" role="status" aria-live="polite">Проверяем подключение…</p><pre id="result"></pre>
+<p class="hint">Сервис работает при запущенном Zapas. После явного подключения reconnect разрешён для этого профиля. «Отключить» прекращает reconnect.</p></section>
+<p class="hint">Защита недавней активности: 10 минут для обоих действий. Active, pinned, audible, incognito, неизвестная активность и исключённые домены защищены. Выгрузка и закрытие могут потерять несохранённое состояние; звонки и формы нельзя надёжно определить через tabs API.</p>
+</main><script type="module" src="control.mjs"></script></html>

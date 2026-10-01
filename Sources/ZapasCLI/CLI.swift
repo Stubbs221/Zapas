@@ -10,15 +10,22 @@ struct ZapasCLI {
         let arguments = Array(CommandLine.arguments.dropFirst())
         if arguments.isEmpty || arguments == ["--help"] || arguments == ["help"] {
             print("""
-            Zapas — read-only diagnostics, JSON v1
+            Zapas — read-only status/processes and explicit Chrome actions, JSON v1
             zapas status --json
             zapas processes --sort memory --limit N --json
+            zapas tabs list --json
+            zapas tabs preview --type discard|close --selection JSON --json
+            zapas tabs apply --plan UUID --apply --json
+            zapas tabs result --plan UUID --json
+            zapas native install --user-data-dir PATH --apply --json
             No persistent monitor; first swap interval and pressure without an event are unknown.
             """)
             return
         }
         let command = arguments[0]
         do {
+            if command == "tabs" { try await tabs(arguments); return }
+            if command == "native" { try native(arguments); return }
             var limit = 20
             var seen: Set<String> = []
             var index = 1
@@ -41,20 +48,33 @@ struct ZapasCLI {
             guard ["status", "processes"].contains(command), seen.contains("--json") else {
                 throw ProbeIssue("invalid_arguments", "Use status --json or processes --json")
             }
-            let coordinator = SamplingCoordinator()
-            let frame = await coordinator.refresh(includeProcesses: command == "processes")
-            await coordinator.stop()
-            if command == "status" {
-                let errors = frame.system?.errors ?? [frame.systemError ?? ProbeIssue("system_failed", "No system data")]
-                try emit(DiagnosticEnvelope(command: command, data: frame.system, errors: errors))
-                if frame.system == nil { exit(1) }
+            let system: SystemDiagnostics?
+            let processes: ProcessDiagnostics?
+            let systemError: ProbeIssue?
+            let processError: ProbeIssue?
+            if FileManager.default.fileExists(atPath: ServiceLocation.socket) {
+                let reply = try await ServiceIPC.asyncRequest(ServiceRequest(command))
+                if let issue = reply.issue { throw issue }
+                system = reply.system; processes = reply.processes
+                systemError = reply.systemError; processError = reply.processError
             } else {
-                let payload = frame.processes.map { value in
+                let coordinator = SamplingCoordinator()
+                let frame = await coordinator.refresh(includeProcesses: command == "processes")
+                await coordinator.stop()
+                system = frame.system; processes = frame.processes
+                systemError = frame.systemError; processError = frame.processError
+            }
+            if command == "status" {
+                let errors = system?.errors ?? [systemError ?? ProbeIssue("system_failed", "No system data")]
+                try emit(DiagnosticEnvelope(command: command, data: system, errors: errors))
+                if system == nil { exit(1) }
+            } else {
+                let payload = processes.map { value in
                     // Preserve inventory failures and accounting while limiting the presented rows.
                     LimitedProcesses(measuredAt: value.measuredAt, processes: Array(value.processes.prefix(limit)),
                                      failures: value.failures, accounting: value.accounting, totalObserved: value.processes.count)
                 }
-                let errors = frame.processes?.errors ?? [frame.processError ?? ProbeIssue("processes_failed", "No process data")]
+                let errors = processes?.errors ?? [processError ?? ProbeIssue("processes_failed", "No process data")]
                 try emit(DiagnosticEnvelope(command: command, data: payload, errors: errors))
                 if payload == nil { exit(1) }
             }
@@ -64,6 +84,51 @@ struct ZapasCLI {
             try? emit(DiagnosticEnvelope(command: command, data: empty, errors: [issue]))
             exit(issue.code == "invalid_arguments" ? 2 : 1)
         }
+    }
+
+    static func options(_ arguments: [String], flags: Set<String>, values: Set<String>) throws -> [String: String] {
+        var options: [String: String] = [:], index = 0
+        while index < arguments.count {
+            let key = arguments[index]
+            guard options[key] == nil else { throw ProbeIssue("invalid_arguments", "Repeated option") }
+            if flags.contains(key) { options[key] = "true"; index += 1 }
+            else if values.contains(key), index + 1 < arguments.count, !arguments[index + 1].hasPrefix("--") {
+                options[key] = arguments[index + 1]; index += 2
+            } else { throw ProbeIssue("invalid_arguments", "Unknown or incomplete option") }
+        }
+        guard options["--json"] != nil else { throw ProbeIssue("invalid_arguments", "--json required") }
+        return options
+    }
+    static func tabs(_ arguments: [String]) async throws {
+        guard arguments.count >= 2 else { throw ProbeIssue("invalid_arguments", "Use tabs list/preview/apply/result") }
+        let verb = arguments[1]
+        let flags: Set<String> = verb == "apply" ? ["--json", "--apply"] : ["--json"]
+        let values: Set<String> = verb == "preview" ? ["--type", "--selection"] : ["apply", "result"].contains(verb) ? ["--plan"] : []
+        let opt = try options(Array(arguments.dropFirst(2)), flags: flags, values: values)
+        var request: ServiceRequest
+        switch verb {
+        case "list": request = ServiceRequest("tabsList")
+        case "preview":
+            guard let type = opt["--type"], let kind = ChromeActionKind(rawValue: type), let selection = opt["--selection"] else { throw ProbeIssue("invalid_arguments", "--type and --selection required") }
+            request = ServiceRequest("tabsPreview"); request.kind = kind
+            do { request.selections = try JSONDecoder().decode([ChromeSelection].self, from: Data(selection.utf8)) }
+            catch { throw ProbeIssue("invalid_arguments", "Selection must be a JSON array of profileID/sessionID/tabID/token") }
+        case "apply", "result":
+            guard let id = opt["--plan"], UUID(uuidString: id) != nil, verb != "apply" || opt["--apply"] != nil else { throw ProbeIssue("invalid_arguments", "UUID --plan and explicit --apply required for action") }
+            request = ServiceRequest(verb == "apply" ? "tabsApply" : "tabsResult"); request.planID = id
+        default: throw ProbeIssue("invalid_arguments", "Unknown tabs subcommand")
+        }
+        let reply = try await ServiceIPC.asyncRequest(request)
+        if let issue = reply.issue { throw issue }
+        try emit(DiagnosticEnvelope(command: "tabs " + verb, data: reply, errors: []))
+    }
+    static func native(_ arguments: [String]) throws {
+        guard arguments.count >= 2, arguments[1] == "install" else { throw ProbeIssue("invalid_arguments", "Use native install") }
+        let opt = try options(Array(arguments.dropFirst(2)), flags: ["--json", "--apply"], values: ["--user-data-dir"])
+        guard opt["--apply"] != nil, let directory = opt["--user-data-dir"], directory.hasPrefix("/") else { throw ProbeIssue("invalid_arguments", "Explicit absolute --user-data-dir and --apply required") }
+        let executable = (Bundle.main.executableURL ?? URL(fileURLWithPath: CommandLine.arguments[0])).deletingLastPathComponent().appendingPathComponent("zapas-native-host")
+        let manifest = try NativeInstallation.install(hostExecutable: executable, userDataDirectory: URL(fileURLWithPath: directory))
+        try emit(DiagnosticEnvelope(command: "native install", data: ["manifest": manifest.path], errors: []))
     }
     struct LimitedProcesses: Codable, Sendable {
         let measuredAt: Date

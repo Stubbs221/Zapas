@@ -7,6 +7,10 @@ import ZapasCore
 @MainActor @Observable
 final class AppModel {
     var frame = DiagnosticFrame()
+    var startupIssue: String?
+    var chrome: ChromeModel?
+    private var service: GUIService?
+    private var listener: GUIServiceListener?
     var showStatus = UserDefaults.standard.object(forKey: "showStatus") as? Bool ?? false {
         didSet { UserDefaults.standard.set(showStatus, forKey: "showStatus") }
     }
@@ -31,11 +35,34 @@ final class AppModel {
         if arguments.contains("--qualification-window") {
             // A developer-only native window hosts the identical view; normal launch has only MenuBarExtra.
             Task { [weak self] in self?.openQualificationWindow() }
+        } else if let index = arguments.firstIndex(of: "--qualification-window-after"), arguments.indices.contains(index + 1),
+                  let delay = Double(arguments[index + 1]), (1...600).contains(delay) {
+            // Finite opt-in test delay allows a real background measurement before opening the identical view.
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(delay))
+                self?.openQualificationWindow()
+            }
         }
         if let index = arguments.firstIndex(of: "--demo"), arguments.indices.contains(index + 1),
            ["empty", "error", "unknown", "stale"].contains(arguments[index + 1]) {
             demo = arguments[index + 1]; frame = DiagnosticDemo.frame(arguments[index + 1])
             return
+        }
+        do {
+            let policies = ProcessInfo.processInfo.environment["ZAPAS_EPHEMERAL"] == "1" ? [:] : UserDefaults.standard.dictionary(forKey: "chromeExclusions") as? [String: [String]] ?? [:]
+            let service = try GUIService(coordinator: coordinator, policies: policies)
+            self.service = service
+            let chrome = ChromeModel(service: service); self.chrome = chrome
+            let listener = try GUIServiceListener { request in await service.handle(request) }
+            self.listener = listener; listener.start()
+        } catch {
+            let code = (error as? ProbeIssue)?.code ?? "ipc_failed"
+            startupIssue = "Chrome-интеграция недоступна (\(code)); системная диагностика продолжает работать."
+            if code == "service_already_running" {
+                startupIssue = "Другой экземпляр Zapas уже работает. Используйте его; второй монитор не запущен."
+                return // A second GUI must not start another persistent sampler.
+            }
+            if let service { chrome = ChromeModel(service: service); chrome?.serviceIssue = "Локальная связь недоступна (\(code))" }
         }
         let coordinator = coordinator
         updates = Task { [weak self] in
@@ -49,7 +76,7 @@ final class AppModel {
         }
         let center = NSWorkspace.shared.notificationCenter
         notifications.append(center.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { _ in
-            Task { await coordinator.willSleep() }
+            Task { await self.service?.suspend(); await coordinator.willSleep() }
         })
         notifications.append(center.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { _ in
             Task { await coordinator.didWake() }
@@ -60,6 +87,7 @@ final class AppModel {
         let visible = !visibleWindows.isEmpty
         guard windowVisible != visible else { return }
         windowVisible = visible
+        chrome?.visibility(visible)
         qualification?.visibility(visible)
         loginStatus = SMAppService.mainApp.status
         guard demo == nil else { return }
@@ -78,7 +106,7 @@ final class AppModel {
     }
     func refresh() {
         if let demo { frame = DiagnosticDemo.frame(demo); return }
-        Task { _ = await coordinator.refresh(includeProcesses: true) }
+        Task { _ = await coordinator.refresh(includeProcesses: true); await chrome?.refresh() }
     }
     func selectDemo(_ mode: String) {
         guard demo != nil, ["empty", "error", "unknown", "stale"].contains(mode) else { return }
@@ -118,9 +146,10 @@ final class AppModel {
     }
     func quit() {
         updates?.cancel()
+        chrome?.stop(); listener?.stop(); listener = nil
         qualification?.stop()
         for token in notifications { NSWorkspace.shared.notificationCenter.removeObserver(token) }
         notifications.removeAll()
-        Task { await coordinator.stop(); NSApplication.shared.terminate(nil) }
+        Task { await service?.suspend(); await coordinator.stop(); NSApplication.shared.terminate(nil) }
     }
 }

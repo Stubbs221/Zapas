@@ -1,0 +1,4 @@
+async function command(type) { const r = await chrome.runtime.sendMessage({ type, label: document.querySelector("#label").value }); if (!r?.ok) throw new Error("Нет ответа расширения"); return r; }
+async function refresh() { try { const r = await command("status"); document.querySelector("#status").textContent = r.connected ? `Подключено: ${r.label}` : `Отключено · ${r.lastIssue ?? "нажмите Подключить"}`; document.querySelector("#result").textContent = r.lastResult ? JSON.stringify(r.lastResult, null, 2) : ""; } catch (e) { document.querySelector("#status").textContent = e.message; } }
+for (const id of ["connect", "disconnect", "refresh"]) document.querySelector(`#${id}`).addEventListener("click", async () => { try { if (id !== "refresh") await command(id); await refresh(); } catch (e) { document.querySelector("#status").textContent = e.message; } });
+refresh();

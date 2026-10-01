@@ -17,6 +17,7 @@ struct DiagnosticsView: View {
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
+                    if let issue = model.startupIssue { Text(issue).font(.caption).foregroundStyle(.orange) }
                     if let demo = model.demo {
                         Text("ДЕМО: \(demo). Синтетические данные")
                             .font(.caption.bold()).foregroundStyle(.orange)
@@ -30,10 +31,11 @@ struct DiagnosticsView: View {
                         Toggle("Усиленный контраст демо", isOn: $model.demoContrast)
                     }
                     systemCard(at: now)
+                    if let chrome = model.chrome { ChromeView(model: chrome) }
                     historyCard(at: now)
                     applicationsCard(at: now)
                     DisclosureGroup("Интеграции — отложены", isExpanded: $integrations) {
-                        Text("Chrome: вкладки появятся в этапе C; точная RAM вкладок неизвестна.\nСимуляторы и LLDB: этап D, активность отладки неизвестна.\nCharles: сохранение сессий не квалифицировано.")
+                        Text("Симуляторы и LLDB: этап D, активность отладки неизвестна.\nCharles: сохранение сессий не квалифицировано.")
                             .font(.caption).foregroundStyle(.secondary).padding(.top, 6)
                     }.card()
                     if settings { settingsCard }
@@ -41,7 +43,7 @@ struct DiagnosticsView: View {
             }
             Divider()
             HStack {
-                Text("Zapas · Только диагностика").font(.caption).foregroundStyle(.secondary)
+                Text("Zapas · Ручной выбор").font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button { settings.toggle() } label: { Image(systemName: "slider.horizontal.3") }
                     .help("Настройки").accessibilityLabel("Настройки").keyboardShortcut(",")
@@ -226,7 +228,7 @@ private struct VisibleClock: TimelineSchedule {
     let active: Bool
     func entries(from startDate: Date, mode: TimelineScheduleMode) -> AnySequence<Date> {
         if active {
-            return AnySequence(PeriodicTimelineSchedule(from: startDate, by: 1).entries(from: startDate, mode: mode))
+            return AnySequence(PeriodicTimelineSchedule(from: startDate, by: 3).entries(from: startDate, mode: mode))
         }
         return AnySequence([startDate])
     }

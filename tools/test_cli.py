@@ -1,15 +1,28 @@
 #!/usr/bin/env python3
-"""Exercise the real Stage B CLI contract without Chrome, Xcode or a background monitor."""
+"""Exercise the public JSON v1 CLI contract with a separate offline runtime."""
 import argparse
 import json
 import os
 from pathlib import Path
 import subprocess
+import tempfile
 import unittest
 
 class CLIContract(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        local = Path(__file__).resolve().parents[1] / ".local"
+        local.mkdir(exist_ok=True)
+        cls.runtime = tempfile.TemporaryDirectory(prefix="cli-contract-", dir=local)
+        cls.environment = {**os.environ, "ZAPAS_RUNTIME": cls.runtime.name}
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.runtime.cleanup()
+
     def invoke(self, *arguments, code=0, environment=None):
-        result = subprocess.run([str(BINARY), *arguments], capture_output=True, text=True, env=environment, timeout=10)
+        env = {**self.environment, **(environment or {}), "ZAPAS_RUNTIME": self.runtime.name}
+        result = subprocess.run([str(BINARY), *arguments], capture_output=True, text=True, env=env, timeout=10)
         self.assertEqual(result.returncode, code, result.stderr)
         self.assertEqual(result.stderr, "")
         self.assertEqual(len(result.stdout.strip().splitlines()), 1)
@@ -81,24 +94,25 @@ class CLIContract(unittest.TestCase):
         self.assertGreater(self.invoke("status", "--json", environment=environment)["data"]["physical"]["value"], 0)
         self.assertIsNotNone(self.invoke("processes", "--json", environment=environment)["data"])
 
-    def test_help_documents_read_only(self):
-        result = subprocess.run([str(BINARY), "--help"], capture_output=True, text=True, timeout=10)
+    def test_help_documents_read_only_diagnostics_and_explicit_actions(self):
+        result = subprocess.run([str(BINARY), "--help"], capture_output=True, text=True, env=self.environment, timeout=10)
         self.assertEqual(result.returncode, 0)
         self.assertIn("read-only", result.stdout)
-        self.assertNotIn("--apply", result.stdout)
+        self.assertIn("tabs preview", result.stdout)
+        self.assertIn("--apply", result.stdout)
 
     def test_failed_stdout_delivery_exits_one(self):
         # A real, read-only stdout descriptor makes delivery fail without changing system APIs.
         with open(os.devnull, "rb") as output:
             result = subprocess.run([str(BINARY), "status", "--json"], stdout=output,
-                                    stderr=subprocess.PIPE, text=True, timeout=10)
+                                    stderr=subprocess.PIPE, text=True, env=self.environment, timeout=10)
         self.assertEqual(result.returncode, 1)
         self.assertEqual(result.stderr, "")
         read_descriptor, write_descriptor = os.pipe()
         os.close(read_descriptor)
         try:
             result = subprocess.run([str(BINARY), "status", "--json"], stdout=write_descriptor,
-                                    stderr=subprocess.PIPE, text=True, timeout=10)
+                                    stderr=subprocess.PIPE, text=True, env=self.environment, timeout=10)
         finally:
             os.close(write_descriptor)
         self.assertEqual(result.returncode, 1)
@@ -106,7 +120,7 @@ class CLIContract(unittest.TestCase):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--binary", type=Path, default=Path(__file__).resolve().parents[1] / ".local/StageB/Zapas.app/Contents/MacOS/zapas")
+    parser.add_argument("--binary", type=Path, default=Path(__file__).resolve().parents[1] / ".local/StageC/Zapas.app/Contents/MacOS/zapas")
     args = parser.parse_args()
     BINARY = args.binary.resolve()
     unittest.main(argv=[__file__], verbosity=2)
