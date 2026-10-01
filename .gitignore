@@ -1,0 +1,16 @@
+# Private references, browser profiles, device assignments and measurements
+.local/
+.env
+.env.*
+*.log
+# Swift / Xcode artifacts
+.build/
+.swiftpm/
+DerivedData/
+build/
+*.xcuserstate
+xcuserdata/
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
