@@ -14,6 +14,10 @@ public enum ServiceIPC {
         let fd = socketPath.withCString { zp_socket_connect($0) }
         guard fd >= 0 else { throw ProbeIssue("ipc_unavailable", "GUI service unavailable (errno \(-fd))") }
         defer { Darwin.close(fd) }
+        if ["simulatorsList", "simulatorsPreview", "debuggersList", "debuggersPreview", "developmentApply"].contains(request.operation) {
+            var timeout = timeval(tv_sec: 45, tv_usec: 0)
+            _ = withUnsafePointer(to: &timeout) { setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, $0, socklen_t(MemoryLayout<timeval>.size)) }
+        }
         try NativeFrame.write(ProbeJSON.encode(request), to: fd)
         guard let body = try NativeFrame.read(from: fd) else { throw ProbeIssue("ipc_disconnected", "Service closed without reply") }
         let reply = try ProbeJSON.decode(ServiceReply.self, from: body)
@@ -96,16 +100,19 @@ public final class GUIServiceListener: @unchecked Sendable {
 public actor GUIService {
     private let coordinator: SamplingCoordinator
     private var broker: ChromeBroker
+    private let development: DevelopmentActions
     public init(coordinator: SamplingCoordinator, origin: String = ServiceLocation.origin, policies: [String: [String]] = [:]) throws {
-        self.coordinator = coordinator; broker = try ChromeBroker(allowedOrigin: origin)
+        self.coordinator = coordinator; development = DevelopmentActions(coordinator: coordinator); broker = try ChromeBroker(allowedOrigin: origin)
         guard policies.count <= 32 else { throw ProbeIssue("exclusion_schema", "Too many profile policies") }
         for (id, domains) in policies { try broker.setPolicy(ChromePolicy(excludedDomains: domains), profileID: id) }
     }
     public func profiles() -> [ChromeProfile] { broker.snapshot() }
-    public func suspend() { broker.suspend() }
+    public func suspend() async { broker.suspend(); await development.suspend() }
+    public func setSimulatorAssignment(_ path: String) async throws { try await development.setAssignmentPath(path) }
     public func setPolicy(_ policy: ChromePolicy, profileID: String) throws { try broker.setPolicy(policy, profileID: profileID) }
     public func handle(_ request: ServiceRequest) async -> ServiceReply {
         do { try request.validate() } catch { return ServiceReply(requestID: request.requestID, issue: error as? ProbeIssue ?? ProbeIssue("invalid_request", "Invalid request")) }
+        if ["simulatorsList", "debuggersList", "simulatorsPreview", "debuggersPreview", "developmentApply", "developmentResult"].contains(request.operation) { return await development.handle(request) }
         if request.operation == "status" || request.operation == "processes" {
             let frame = await coordinator.refresh(includeProcesses: request.operation == "processes")
             var reply = ServiceReply(requestID: request.requestID)

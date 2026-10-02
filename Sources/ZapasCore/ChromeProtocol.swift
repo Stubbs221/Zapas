@@ -124,6 +124,10 @@ public struct ServiceRequest: Codable, Sendable {
     public var kind: ChromeActionKind?
     public var planID: String?
     public var result: ChromeResult?
+    public var simulator: AssignedSimulator?
+    public var debuggerIdentity: ProcessIdentity?
+    public var apply: Bool?
+    public var developmentKind: DActionKind?
     public init(_ operation: String) { self.operation = operation }
     public func validate() throws {
         guard version == 1, UUID(uuidString: requestID) != nil else { throw ProbeIssue("protocol_version_or_request", "Expected v1 and UUID requestID") }
@@ -160,6 +164,10 @@ public struct ServiceReply: Codable, Sendable {
     public var command: ChromeCommand?
     public var batch: ChromeBatch?
     public var policy: ChromePolicy?
+    public var simulators: SimulatorDiagnostics?
+    public var debuggers: DebuggerDiagnostics?
+    public var developmentPlan: DActionPlan?
+    public var developmentOutcome: DActionOutcome?
     public var system: SystemDiagnostics?
     public var processes: ProcessDiagnostics?
     public var systemError: ProbeIssue?

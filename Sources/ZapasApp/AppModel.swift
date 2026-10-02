@@ -9,6 +9,7 @@ final class AppModel {
     var frame = DiagnosticFrame()
     var startupIssue: String?
     var chrome: ChromeModel?
+    var development: DevelopmentModel?
     private var service: GUIService?
     private var listener: GUIServiceListener?
     var showStatus = UserDefaults.standard.object(forKey: "showStatus") as? Bool ?? false {
@@ -52,6 +53,7 @@ final class AppModel {
             let policies = ProcessInfo.processInfo.environment["ZAPAS_EPHEMERAL"] == "1" ? [:] : UserDefaults.standard.dictionary(forKey: "chromeExclusions") as? [String: [String]] ?? [:]
             let service = try GUIService(coordinator: coordinator, policies: policies)
             self.service = service
+            development = DevelopmentModel(service: service)
             let chrome = ChromeModel(service: service); self.chrome = chrome
             let listener = try GUIServiceListener { request in await service.handle(request) }
             self.listener = listener; listener.start()
@@ -106,7 +108,7 @@ final class AppModel {
     }
     func refresh() {
         if let demo { frame = DiagnosticDemo.frame(demo); return }
-        Task { _ = await coordinator.refresh(includeProcesses: true); await chrome?.refresh() }
+        Task { _ = await coordinator.refresh(includeProcesses: true); await chrome?.refresh(); await development?.refresh() }
     }
     func selectDemo(_ mode: String) {
         guard demo != nil, ["empty", "error", "unknown", "stale"].contains(mode) else { return }

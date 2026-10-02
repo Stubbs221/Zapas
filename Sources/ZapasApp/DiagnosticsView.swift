@@ -32,10 +32,11 @@ struct DiagnosticsView: View {
                     }
                     systemCard(at: now)
                     if let chrome = model.chrome { ChromeView(model: chrome) }
+                    if let development = model.development { DevelopmentView(model: development) }
                     historyCard(at: now)
                     applicationsCard(at: now)
                     DisclosureGroup("Интеграции — отложены", isExpanded: $integrations) {
-                        Text("Симуляторы и LLDB: этап D, активность отладки неизвестна.\nCharles: сохранение сессий не квалифицировано.")
+                        Text("Charles: сохранение сессий не квалифицировано.")
                             .font(.caption).foregroundStyle(.secondary).padding(.top, 6)
                     }.card()
                     if settings { settingsCard }

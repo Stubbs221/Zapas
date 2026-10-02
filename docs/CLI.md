@@ -1,4 +1,4 @@
-# Zapas CLI — диагностический JSON v1 и явные Chrome-действия
+# Zapas CLI — диагностический JSON v1 и явные Chrome/Simulator-действия
 
 CLI `zapas` входит в локальную `Zapas.app`, использует те же модели диагностики и `SamplingCoordinator`, что GUI. `zapas-probe` и канал A Native Messaging остаются экспериментальными: их version=1 **не** является этим контрактом. Production host C имеет отдельный `ServiceRequest/ServiceReply` v1; публичные команды используют прежний `DiagnosticEnvelope` schemaVersion=1.
 
@@ -46,7 +46,7 @@ Footprint и RSS не складываются. Групповая сумма fo
 
 При наличии GUI socket CLI обращается к его единственному coordinator: существующий interval/pressure могут быть доступны. Без GUI `status/processes` создают конечный coordinator для одного сбора. При существующем, но недоступном socket возвращается IPC error, обход отдельным монитором не выполняется. История CLI не сохраняется; GUI хранит до 15 минут / 600 системных точек в памяти и только последний process inventory. Никаких URL и отправки данных наружу. JSON содержит имена, пути и PID — реальные снимки сохранять только в `.local/`.
 
-В пределах v1 допустимы новые поля и коды ошибок; потребители игнорируют неизвестные поля. Значение существующих полей, их единицы и nullable-политика не изменяются без новой версии. В B действия отсутствовали. C добавляет только явные Chrome-команды ниже; произвольного shell, MCP, Simulator/LLDB/Charles-действий нет.
+В пределах v1 допустимы новые поля и коды ошибок; потребители игнорируют неизвестные поля. Значение существующих полей, их единицы и nullable-политика не изменяются без новой версии. В B действия отсутствовали. C добавляет явные Chrome-команды ниже; D расширяет контракт конкретными Simulator/LLDB-командами. Произвольного shell, универсального kill/shutdown, MCP или Charles control нет.
 
 
 ## Добавления C
@@ -78,3 +78,29 @@ Batch `before/after` содержит наблюдаемые групповые 
 Новые ошибки включают `ipc_unavailable`, `ipc_disconnected`, `ipc_reply_mismatch`, `service_already_running`, `session_stale`, `session_replaced`, `tab_identity_changed`, `tab_state_changed`, `tab_excluded`, `selection_required`, `preview_expired_or_used`, `result_unknown`, `install_conflict`, `install_directory`, `install_binary`. Неизвестные будущие коды допустимы. Код 1 — IPC/политика/установка; код 2 — аргументы; код 0 — полученный payload, **не подтверждение действия**. Для failed/unknown смотреть result.status. Отсутствующий optional C-параметр отличается от обязательных null полей метрик JSON v1.
 
 Обычный socket — `~/Library/Application Support/Zapas/run/gui.sock`, runtime 0700, socket 0600, peer того же UID. Advisory lease предотвращает второй GUI и позволяет восстанавливать только proven-stale собственный socket. Другие программы того же пользователя находятся в этой локальной границе доверия; IPC не является защитой от вредоносного кода того же UID. `ZAPAS_RUNTIME` — явный override для изолированных тестов. Installer требует absolute user-data-dir и `--apply`; не загружает расширение и не изменяет рабочие Chrome preferences.
+
+
+## Добавления D
+
+```text
+zapas simulators list --json
+zapas simulators preview --selection JSON --json
+zapas simulators apply --plan UUID --apply --json
+zapas simulators result --plan UUID --json
+zapas debuggers list --json
+zapas debuggers preview --selection JSON --json
+zapas debuggers apply --plan UUID --apply --json
+zapas debuggers result --plan UUID --json
+```
+
+Envelope и метрики v1/C неизменны. `simulators list.data` — `measuredAt`, `totalDeviceCount` полного simctl devices всех runtimes, `devices`, `assignmentIssue`, `processes`, `unassignedProcesses`, `processIssue`, `processFailures`, `processMeasuredAt`. Каждый devices entry: `device` (name, udid, runtime, state, isAvailable, dataPath?, assignment, isIOS), `incarnation?`, `assignmentVerified`. `assignment` — только явное project из `.local/simulator-assignment.json` для перечисленных UDID либо `unknown_or_other_project`; имя не доказывает принадлежность. Legacy A assignment остаётся читаемым, без `bindings` действия не разрешены. Каждый binding совпадает с udid/runtime/dataPath/incarnation; смена runtime, каталога устройства или назначения блокирует действие. incarnation берётся через lstat каталога устройства: dev/inode/birthtime с nanoseconds. Не доверять полям request: core повторно читает локальное назначение и весь simctl inventory.
+
+`processes` — группы `{udid,processes:[DiagnosticProcess]}` по executable внутри конкретного dataPath. `unassignedProcesses` — наблюдаемые generic CoreSimulator/Simulator helpers без однозначного пути; это не полный набор системных helpers. Empty group не доказывает отсутствия приложений/отладки. Process failures и unknown/null memory сохраняются, footprint/RSS отдельно; частичный executable inventory, не unique physical RAM. Ошибка simctl возвращает error/null; отсутствие назначения даёт partial inventory, действия закрыты. Без GUI list — конечный read-only сбор; при наличии socket только GUI сервис и его coordinator, без fallback при отказе.
+
+Simulator `--selection` — **один полный объект из `data.devices`**, выбранный вручную. Preview требует exact identity, availability, Zapas assignment/binding и iOS; не принимает `all`, `booted` или только UDID. State должен быть Booted либо Shutdown. `data.developmentPlan`: id/kind/createdAt/expiresAt, simulator?, debugger?, affectedProcesses, impact, impactIssue?. Перечень процессов частичный; preview предупреждает о завершении всех apps/debugging конкретного устройства даже при пустой группе. Preview не действует. План одноразовый, 30 с, максимум 64; смена назначения/sleep инвалидирует планы. Apply требует `--apply`, правильный kind и план этого GUI; потребляется до проверки/отправки и никогда не повторяется. Apply/result содержат `data.developmentOutcome` с plan и result `{status:confirmed|failed|unknown,issue?,measuredAt}`. GUI команды отправляют тот же explicit apply.
+
+Перед действием повторно читаются полный inventory, runtime/state, lstat incarnation и файл назначения, затем backend повторяет проверку и expiry непосредственно перед fixed `/usr/bin/xcrun simctl shutdown <UUID>`. Уже Shutdown: confirmed с `device_already_shutdown`, без команды. После доставки повторно читается фактическое состояние: та же identity и Shutdown — confirmed; Booted — failed; переход/исчезновение/смена identity/отказ чтения или доставки — unknown. До доставки изменение/чужая принадлежность — failed. Никаких helper kills, runtime delete, erase, boot или tvOS действий в продукте. Socket read deadline только D discovery/apply увеличен до 45 с для конечных simctl операций; прежние C leases и wire framing сохранены. Simctl list bounded 5 с, shutdown 10 с; deadline ошибки не подтверждают отсутствие воздействия. Результаты immutable после завершения, до 128/900 с, только в GUI-памяти; result не запускает новую команду. Timeout CLI не означает, что действие не состоялось: запрашивайте тот же result, не новый apply.
+
+`debuggers list.data`: measuredAt, debuggers, failures, qualification=`not_run_user_deferred`. Каждый debugger: process в v1 формате, activity=`active|inactive|unknown`, orphanhood=`proven|candidate|unknown`, evidence `{code,explanation,relatedIdentity?}`, measuredAt, qualified. Живой источник D выдаёт только unknown activity и qualified=false; PPID=1 только candidate. Parent/children — объяснимые наблюдения, не отрицательное доказательство активности. Partial inventory не подтверждает отсутствие target или Xcode. `--selection` для LLDB preview — только process.identity `{pid,startSeconds,startMicroseconds}`; клиент не передаёт trusted proof. Действие блокируется с `debugger_activity_unproven` до отдельной live qualification; имя/PPID/большая память не дают разрешения. Контракт свежей проверки владельца/current UID, PID/start identity, absence of active debug и confirmed/failed/unknown проверен injected tests. Live terminate backend намеренно отключён и не отправляет сигналов. Это blocker D, не PASS живого завершения; для включения нужна новая квалификация/реализация backend.
+
+Код 0 означает доставленный payload, включая failed/unknown результат действия; для успеха смотреть result.status. Код 1 — IPC/политика/сбор, 2 — аргументы. D errors включают `assignment_path`, `assignment_unavailable`, `assignment_schema`, `simctl_unavailable`, `device_inventory_invalid`, `device_not_authorized`, `device_identity_or_state_changed`, `device_disappeared`, `device_already_shutdown`, `device_still_booted`, `device_state_unknown`, `device_identity_or_assignment_changed`, `apply_required`, `action_in_progress`, `action_limit`, `service_suspended`, `debugger_evidence_stale`, `debugger_owner_changed`, `debugger_identity_unknown`, `debugger_activity_unproven`, `debugger_qualification_required`. Все новые поля/коды additive; optional D поля не изменяют mandatory null полей метрик v1.

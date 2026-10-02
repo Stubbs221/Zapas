@@ -11,8 +11,8 @@ public struct SimulatorDevice: Codable, Sendable, Equatable {
     public let isIOS: Bool
 }
 
-public struct SimulatorSnapshot: Encodable, Sendable {
-    public let schemaVersion = 1
+public struct SimulatorSnapshot: Codable, Sendable {
+    public var schemaVersion = 1
     public let measuredAt: Date
     public let totalDeviceCount: Int
     public let devices: [SimulatorDevice]
@@ -36,6 +36,7 @@ public enum SimulatorInventory {
                                               isIOS: runtime.hasPrefix("com.apple.CoreSimulator.SimRuntime.iOS-")))
             }
         }
+        guard output.count <= 1000, Set(output.map(\.udid)).count == output.count else { throw ProbeIssue("device_inventory_invalid", "Duplicate or excessive device inventory") }
         output.sort { $0.runtime == $1.runtime ? $0.name < $1.name : $0.runtime < $1.runtime }
         return SimulatorSnapshot(measuredAt: Date(), totalDeviceCount: output.count, devices: output, issue: nil)
     }
@@ -48,25 +49,29 @@ public enum SimulatorInventory {
         guard let path else { return [] }
         // No inference from device names or generic Simulator.app. Only a concrete device data directory is evidence.
         return devices.compactMap { device in
-            guard let dataPath = device.dataPath, path.hasPrefix(dataPath + "/") else { return nil }
+            guard let dataPath = device.dataPath, dataPath.hasPrefix("/"), dataPath != "/",
+                  path.hasPrefix("/"), URL(fileURLWithPath: path).standardizedFileURL.path.hasPrefix(URL(fileURLWithPath: dataPath).standardizedFileURL.path + "/") else { return nil }
             return device.udid
         }
     }
     public static func read(assignedUDIDs: Set<String> = []) throws -> SimulatorSnapshot {
+        try decode(command(["list", "devices", "-j"], timeoutSeconds: 5), assignedUDIDs: assignedUDIDs)
+    }
+    static func command(_ arguments: [String], timeoutSeconds: Double) throws -> Data {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
-        process.arguments = ["simctl", "list", "devices", "-j"]
+        process.arguments = ["simctl"] + arguments
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
         let timeout = DispatchWorkItem { if process.isRunning { process.terminate() } }
         try process.run()
-        DispatchQueue.global().asyncAfter(deadline: .now() + 15, execute: timeout)
+        DispatchQueue.global().asyncAfter(deadline: .now() + timeoutSeconds, execute: timeout)
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit(); timeout.cancel()
         guard process.terminationStatus == 0 else {
             throw ProbeIssue("simctl_unavailable", "xcrun simctl failed (status \(process.terminationStatus)); Xcode/service/access may be unavailable")
         }
-        return try decode(data, assignedUDIDs: assignedUDIDs)
+        return data
     }
 }

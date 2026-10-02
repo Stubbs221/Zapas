@@ -56,6 +56,12 @@ class HostTests(unittest.TestCase):
     def test_origin_and_extension_cannot_enqueue_actions(self):
         p=self.host('chrome-extension://'+'b'*32+'/');p.stdin.close();p.wait(timeout=5);self.assertEqual(p.returncode,1)
         p=self.host();r=self.send(p,'tabsApply',profileID=str(uuid.uuid4()),planID=str(uuid.uuid4()));self.assertFalse(r['ok']);self.assertEqual(len(self.requests),0)
+    def test_extension_cannot_read_or_execute_development_operations(self):
+        p=self.host()
+        for operation in ('simulatorsList', 'debuggersList', 'simulatorsPreview', 'developmentApply'):
+            reply=self.send(p,operation,profileID=str(uuid.uuid4()),planID=str(uuid.uuid4()),apply=True,developmentKind='simulatorShutdown')
+            self.assertFalse(reply['ok']);self.assertEqual(reply['issue']['code'],'host_operation_denied')
+        self.assertEqual(self.requests,[])
     def test_stamps_native_session_and_immutable_profile(self):
         p=self.host();profile=str(uuid.uuid4());forged=str(uuid.uuid4())
         hello=self.send(p,'chromeHello',profileID=profile,sessionID=forged,origin='forged')

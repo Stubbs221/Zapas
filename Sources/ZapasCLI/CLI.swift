@@ -10,13 +10,22 @@ struct ZapasCLI {
         let arguments = Array(CommandLine.arguments.dropFirst())
         if arguments.isEmpty || arguments == ["--help"] || arguments == ["help"] {
             print("""
-            Zapas — read-only status/processes and explicit Chrome actions, JSON v1
+            Zapas — read-only diagnostics and explicit Chrome/Simulator actions, JSON v1
             zapas status --json
             zapas processes --sort memory --limit N --json
             zapas tabs list --json
             zapas tabs preview --type discard|close --selection JSON --json
             zapas tabs apply --plan UUID --apply --json
             zapas tabs result --plan UUID --json
+            zapas simulators list --json
+            zapas simulators preview --selection JSON --json
+            zapas simulators apply --plan UUID --apply --json
+            zapas simulators result --plan UUID --json
+            zapas debuggers list --json
+            zapas debuggers preview --selection JSON --json
+            zapas debuggers apply --plan UUID --apply --json
+            zapas debuggers result --plan UUID --json
+            LLDB actions are blocked until activity/orphanhood is qualified; unknown is never safe.
             zapas native install --user-data-dir PATH --apply --json
             No persistent monitor; first swap interval and pressure without an event are unknown.
             """)
@@ -24,6 +33,7 @@ struct ZapasCLI {
         }
         let command = arguments[0]
         do {
+            if ["simulators", "debuggers"].contains(command) { try await development(arguments); return }
             if command == "tabs" { try await tabs(arguments); return }
             if command == "native" { try native(arguments); return }
             var limit = 20
@@ -121,6 +131,52 @@ struct ZapasCLI {
         let reply = try await ServiceIPC.asyncRequest(request)
         if let issue = reply.issue { throw issue }
         try emit(DiagnosticEnvelope(command: "tabs " + verb, data: reply, errors: []))
+    }
+    static func development(_ arguments: [String]) async throws {
+        guard arguments.count >= 2 else { throw ProbeIssue("invalid_arguments", "Use list/preview/apply/result") }
+        let group = arguments[0], verb = arguments[1]
+        let opt = try options(Array(arguments.dropFirst(2)), flags: verb == "apply" ? ["--json", "--apply"] : ["--json"],
+                              values: verb == "preview" ? ["--selection"] : ["apply", "result"].contains(verb) ? ["--plan"] : [])
+        var request: ServiceRequest
+        switch verb {
+        case "list": request = ServiceRequest(group + "List")
+        case "preview":
+            guard let selection = opt["--selection"] else { throw ProbeIssue("invalid_arguments", "Explicit --selection required") }
+            request = ServiceRequest(group + "Preview")
+            do {
+                if group == "simulators" { request.simulator = try JSONDecoder().decode(AssignedSimulator.self, from: Data(selection.utf8)) }
+                else { request.debuggerIdentity = try JSONDecoder().decode(ProcessIdentity.self, from: Data(selection.utf8)) }
+            } catch { throw ProbeIssue("invalid_arguments", "Select one exact devices entry, or debugger process.identity, from list JSON") }
+        case "apply", "result":
+            guard let id = opt["--plan"], UUID(uuidString: id) != nil, verb != "apply" || opt["--apply"] != nil else {
+                throw ProbeIssue("invalid_arguments", "UUID --plan and explicit --apply required for action")
+            }
+            request = ServiceRequest(verb == "apply" ? "developmentApply" : "developmentResult")
+            request.planID = id; request.apply = verb == "apply"; request.developmentKind = group == "simulators" ? .simulatorShutdown : .debuggerTerminate
+        default: throw ProbeIssue("invalid_arguments", "Unknown development subcommand")
+        }
+        // Only read-only list can run without GUI. Plans and results belong to its single in-memory service.
+        if verb == "list", !FileManager.default.fileExists(atPath: ServiceLocation.socket) {
+            if group == "simulators" {
+                var list = try await SimulatorDiscovery.read(assignmentPath: SimulatorAssignment.defaultPath)
+                let coordinator = SamplingCoordinator()
+                let frame = await coordinator.refresh(includeProcesses: true); await coordinator.stop()
+                list.associate(frame.processes, issue: frame.processError)
+                try emit(DiagnosticEnvelope(command: group + " list", data: list, errors: list.errors))
+            } else {
+                let coordinator = SamplingCoordinator()
+                let frame = await coordinator.refresh(includeProcesses: true); await coordinator.stop()
+                guard frame.processError == nil, let inventory = frame.processes else { throw frame.processError ?? ProbeIssue("processes_failed", "No process data") }
+                let list = DebuggerDiscovery.read(inventory)
+                try emit(DiagnosticEnvelope(command: group + " list", data: list, errors: list.failures.map(\.issue)))
+            }
+            return
+        }
+        let reply = try await ServiceIPC.asyncRequest(request)
+        if let issue = reply.issue { throw issue }
+        if let list = reply.simulators { try emit(DiagnosticEnvelope(command: group + " " + verb, data: list, errors: list.errors)) }
+        else if let list = reply.debuggers { try emit(DiagnosticEnvelope(command: group + " " + verb, data: list, errors: list.failures.map(\.issue))) }
+        else { try emit(DiagnosticEnvelope(command: group + " " + verb, data: reply, errors: [])) }
     }
     static func native(_ arguments: [String]) throws {
         guard arguments.count >= 2, arguments[1] == "install" else { throw ProbeIssue("invalid_arguments", "Use native install") }
